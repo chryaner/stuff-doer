@@ -5,31 +5,18 @@
     <title>Basched</title>
 
     <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+    <script src="https://unpkg.com/vue-router/dist/vue-router.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios@0.12.0/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lodash@4.13.1/lodash.min.js"></script>
 
 </head>
 <body>
 
-<div id="watch-example">
-    Time: {{current_task_duration}}
-    <br>
-    <b>Current Task</b>
-    <task-item
-            v-for="task in current_task"
-            v-bind:task="task"
-            v-bind:priority="priority">
-    </task-item>
-
-    <b>Other Tasks	Priority</b>
-    <task-item
-            v-for="task in tasks"
-            v-bind:task="task"
-            v-bind:priority="priority">
-    </task-item>
+<div id="app">
+    <router-view></router-view>
 </div>
 
-<script src="script.js"></script>
+<script src="/html/script.js"></script>
 
 </body>
 </html>
