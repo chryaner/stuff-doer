@@ -1,4 +1,9 @@
+// Global Variables
+// TODO: Improve
 Vue.prototype.$priority = ["Immediate", "High", "Regular"];
+Vue.prototype.$errorHandler = function(error) {
+                                  console.log('Error! Could not reach the API. ' + error);
+                              };
 
 const TaskItem = {
 	props: ['task', 'priority'],
@@ -33,25 +38,24 @@ const TasksList = {
 			var vm = this
 			axios.get('/basched/unfinishedtasks')
 				.then(function(response) {
-					vm.tasks = _.values(response.data.tasks)
-
-					var current_task = _.filter(vm.tasks, ['current', true]);
-					if (current_task.length) {
-						vm.current_task = current_task;
-						axios.get('/basched/getRemainingPomodoroTime?taskid=' + current_task[0].id + '&priority=' + current_task[0].priority)
-							.then(function(response) {
-								vm.current_task_duration = response.data.duration;
-							})
-							.catch(function(error) {
-								console.log('Error! Could not reach the API. ' + error);
-							})
-					}
-
+				    // TODO: Improve
+				    vm.unfinishedTasksCallBack(response,vm)
 				})
-				.catch(function(error) {
-					console.log('Error! Could not reach the API. ' + error);
-				})
-		}
+				.catch(this.$errorHandler)
+		},
+        unfinishedTasksCallBack: function(response,vm) {
+            vm.tasks = _.values(response.data.tasks)
+
+            var current_task = _.filter(vm.tasks, ['current', true]);
+            if (current_task.length) {
+                vm.current_task = current_task;
+                axios.get('/basched/getRemainingPomodoroTime?taskid=' + current_task[0].id + '&priority=' + current_task[0].priority)
+                    .then(function(response) {
+                        vm.current_task_duration = response.data.duration;
+                    })
+                    .catch(this.$errorHandler)
+            }
+        }
 	},
 	data: function() {
 		return {
