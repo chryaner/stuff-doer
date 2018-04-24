@@ -1,9 +1,11 @@
-package main
+package scheduler
 
 import akka.actor.{Actor, ActorLogging, ActorRef, PoisonPill, Props}
-import main.BaschedRequest._
-import main.DatabaseActor.QueryResult
+import database.DatabaseActor
+import database.DatabaseActor.QueryResult
 import org.joda.time.format.DateTimeFormat
+import webserver.WebServerActor
+import scheduler.BaschedRequest._
 
 import scala.util.{Success, Try}
 
@@ -26,12 +28,15 @@ object BaschedRequest {
   case class ReplyAddTask(response: Int) extends Message
 
   case object RequestAllUnfinishedTasks extends Message
-  case class Task(id: Int, prjId: Int, name: String, startTimestamp: String, priority: Int, status: Int,
+  case class Task(id: Int, prjId: Int, prjName: String, name: String, startTimestamp: String, priority: Int, status: Int,
                   pomodoros: Int, current: Boolean)
   case class ReplyAllUnfinishedTasks(tasks: List[Task])
 
   case class RequestAddRecord(taskId: Int, endTimestamp: Long, duration: Long) extends Message
   case class ReplyAddRecord(response: Int)
+
+  case class RequestAddProject(projectName: String) extends Message
+  case class ReplyAddProject(response: Int)
 
   case class RequestRemainingTimeInPomodoro(taskId: Int, priority: Int) extends Message
   case class ReplyRemainingTimeInPomodoro(duration: Long)
@@ -44,6 +49,9 @@ object BaschedRequest {
 
   case class RequestTaskStatusUpdate(taskid: Int, newStatus: Int) extends Message
   case class ReplyTaskStatusUpdate(response: Int)
+
+  case object RequestUpdateAllWindowFinishedToReady extends Message
+  case class ReplyUpdateAllWindowFinishedToReady(response: Int)
 
   /**
     * Returns a [[Props]] object with instantiated [[BaschedRequest]] class.
@@ -70,11 +78,13 @@ class BaschedRequest(db: ActorRef) extends Actor with ActorLogging {
     case RequestAllProjects => queryGetAllProjects()
     case addTask: AddTask => addNewTask(addTask)
     case addRecord: RequestAddRecord => addNewRecord(addRecord)
+    case RequestAddProject(prjName) => requestAddProject(prjName)
     case RequestAllUnfinishedTasks => queryAllUnfinishedTasks()
     case RequestUpdatePmdrCountInTask(taskid, pom) => requestUpdatePmdrCount(taskid, pom)
     case req: RequestRemainingTimeInPomodoro => queryRemainingTimeInPomodoro(req.taskId,req.priority)
     case RequestTaskDetails(taskid) => requestTaskDetails(taskid)
     case req: RequestTaskStatusUpdate => requestTaskStatusUpdate(req.taskid, req.newStatus)
+    case RequestUpdateAllWindowFinishedToReady => requestUpdateAllWindowFinishedToReady()
     case r: DatabaseActor.QueryResult =>
       handleReply(r)
       self ! PoisonPill
@@ -126,10 +136,28 @@ class BaschedRequest(db: ActorRef) extends Actor with ActorLogging {
     }
   }
 
+  def requestAddProject(projectName: String) : Unit = {
+    replyTo = sender()
+    handleReply = replyAddProject
+    db ! DatabaseActor.QueryDB(0, s"INSERT INTO ${Basched.TABLE_NAME_PROJECTS} (NAME) VALUES ('$projectName')",
+      update = true)
+  }
+
+  def replyAddProject(r: DatabaseActor.QueryResult) : Unit = {
+    r match {
+      case QueryResult(_, _, _, 0) => replyTo ! ReplyAddProject(BaschedRequest.ADDED)
+      case QueryResult(_, _, _, 23505) => replyTo ! ReplyAddProject(BaschedRequest.DUPLICATE)
+      case _ => replyTo ! ReplyAddProject(BaschedRequest.ERROR)
+    }
+  }
+
   def queryAllUnfinishedTasks(): Unit = {
     replyTo = sender()
     handleReply = replyAllUnfinishedTasks
-    db ! DatabaseActor.QueryDB(0, s"SELECT * FROM ${Basched.TABLE_NAME_TASKS} WHERE STATUS != ${Basched.STATUS("FINISHED")}")
+    db ! DatabaseActor.QueryDB(0, s"SELECT t.ID, t.PRJID, p.NAME, t.NAME, t.START, t.PRIORITY, t.STATUS, t.POMODOROS " +
+      s"FROM ${Basched.TABLE_NAME_TASKS} t JOIN ${Basched.TABLE_NAME_PROJECTS} p " +
+      s"ON t.PRJID = p.ID " +
+      s" WHERE t.STATUS != ${Basched.STATUS("FINISHED")}")
   }
 
   def replyAllUnfinishedTasks(r: DatabaseActor.QueryResult): Unit = {
@@ -144,8 +172,8 @@ class BaschedRequest(db: ActorRef) extends Actor with ActorLogging {
     * @return [[Task]] object.
     */
   def listToTask(taskAsList: List[String]) : Task = {
-    Task(taskAsList.head.toInt,taskAsList(1).toInt,taskAsList(2),
-      taskAsList(3),taskAsList(4).toInt,taskAsList(5).toInt,taskAsList(6).toInt, current = false)
+    Task(taskAsList(0).toInt, taskAsList(1).toInt, taskAsList(2), taskAsList(3), taskAsList(4), taskAsList(5).toInt,
+      taskAsList(6).toInt, taskAsList(7).toInt, current = false)
   }
 
   /**
@@ -154,7 +182,8 @@ class BaschedRequest(db: ActorRef) extends Actor with ActorLogging {
     * @return The same list of [[Task]]s, but with one [[Task]] that has the property [[Task.current]] as true.
     */
   def selectCurrentTask(tasks: List[Task]): List[Task] = {
-    val (immTasks, otherTasks) = tasks.partition(_.priority == Basched.PRIORITY("im"))
+    val readyTasks = tasks.filter(_.status == Basched.STATUS("READY"))
+    val (immTasks, otherTasks) = readyTasks.partition(_.priority == Basched.PRIORITY("im"))
     val (highTasks, regTasks) = otherTasks.partition(_.priority == Basched.PRIORITY("hi"))
 
     val selectedId = getImmPriorityTaskId(immTasks) match {
@@ -171,7 +200,7 @@ class BaschedRequest(db: ActorRef) extends Actor with ActorLogging {
     val tasksWithSelected = tasks.map(task => {
       val isCurrentTask = if (selectedId.isDefined && selectedId.get == task.id) true else false
 
-      Task(task.id,task.prjId,task.name,task.startTimestamp,task.priority,task.status,task.pomodoros, isCurrentTask)
+      Task(task.id,task.prjId,task.prjName,task.name,task.startTimestamp,task.priority,task.status,task.pomodoros, isCurrentTask)
     })
 
     tasksWithSelected
@@ -260,7 +289,10 @@ class BaschedRequest(db: ActorRef) extends Actor with ActorLogging {
   def requestTaskDetails(taskid: Int) : Unit = {
     replyTo = sender()
     handleReply = replyTaskDetails
-    db ! DatabaseActor.QueryDB(0, s"SELECT * FROM ${Basched.TABLE_NAME_TASKS} WHERE ID = $taskid")
+    db ! DatabaseActor.QueryDB(0, s"SELECT t.ID, t.PRJID, p.NAME, t.NAME, t.START, t.PRIORITY, t.STATUS, t.POMODOROS " +
+      s"FROM ${Basched.TABLE_NAME_TASKS} t JOIN ${Basched.TABLE_NAME_PROJECTS} p " +
+      s"ON t.PRJID = p.ID " +
+      s"WHERE t.ID = $taskid")
   }
 
   /**
@@ -292,6 +324,28 @@ class BaschedRequest(db: ActorRef) extends Actor with ActorLogging {
     r match {
       case QueryResult(_, _, _, 0) => replyTo ! ReplyTaskStatusUpdate(BaschedRequest.UPDATED)
       case _ => replyTo ! ReplyTaskStatusUpdate(BaschedRequest.ERROR)
+    }
+  }
+
+  /**
+    * Update the [[Task.status]] of all [[Task]]s that are WINDOW_FINISHED to READY.
+    */
+  def requestUpdateAllWindowFinishedToReady() : Unit = {
+    replyTo = sender()
+    handleReply = replyUpdateAllWindowFinishedToReady
+
+    db ! DatabaseActor.QueryDB(0, s"UPDATE ${Basched.TABLE_NAME_TASKS} SET STATUS=${Basched.STATUS("READY")} " +
+      s"WHERE STATUS=${Basched.STATUS("WINDOW_FINISHED")}", update = true)
+  }
+
+  /**
+    * Handles the reply of update all WINDOW_FINISHED [[Task.status]]s to READY [[Task.status]]s.
+    * @param r The [[DatabaseActor.QueryResult]].
+    */
+  def replyUpdateAllWindowFinishedToReady(r: DatabaseActor.QueryResult) : Unit = {
+    r match {
+      case QueryResult(_, _, _, 0) => replyTo ! ReplyUpdateAllWindowFinishedToReady(BaschedRequest.UPDATED)
+      case _ => replyTo ! ReplyUpdateAllWindowFinishedToReady(BaschedRequest.ERROR)
     }
   }
 }

@@ -1,8 +1,10 @@
-package main
+package scheduler
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import database.DatabaseActor
 import utils.Configuration
-import main.Basched._
+import webserver.WebServerActor
+import scheduler.Basched._
 
 /**
   * A companion object for the [[Basched]] class.
@@ -15,9 +17,10 @@ object Basched {
   val TABLE_NAME_PROJECTS = "projects"
 
   val PRIORITY = Map("im" -> 0, "hi" -> 1, "re" -> 2)
-  val STATUS = Map("READY" -> 0, "WINDOW_FINISHED" -> 1, "ON_HOLD" -> 2, "FINISHED" -> 3)
+  val STATUS = Map("READY" -> 0, "WINDOW_FINISHED" -> 1, "ON_HOLD_WINDOW_FINISHED" -> 2, "ON_HOLD_READY" -> 3,
+    "FINISHED" -> 4)
   val NUM_OF_PMDRS_PER_PRIORITY = Map(PRIORITY("im") -> 0, PRIORITY("hi") -> 8, PRIORITY("re") -> 4)
-  val POMODORO_MAX_DURATION_MS = 15000 //25 * 60 * 1000
+  val POMODORO_MAX_DURATION_MS = 25 * 60 * 1000
 
   /**
     * Returns a [[Props]] object with an instantiated [[Basched]] class.
@@ -42,7 +45,7 @@ class Basched(config: Configuration) extends Actor with ActorLogging {
 
   val db: ActorRef = context.parent
   var webServer: ActorRef = _
-  
+
   var requests: Map[Int, ((DatabaseActor.QueryResult) => Unit)] = Map(0 -> ((_: DatabaseActor.QueryResult) => ()))
 
   override def preStart(): Unit = {
@@ -105,8 +108,8 @@ class Basched(config: Configuration) extends Actor with ActorLogging {
     s")"
 
   private def createStmtProjectsTable = s"CREATE TABLE $TABLE_NAME_PROJECTS (" +
-    s"ID INT UNIQUE, " +
-    s"NAME VARCHAR(255)" +
+    s"ID INT AUTO_INCREMENT, " +
+    s"NAME VARCHAR(255) UNIQUE" +
     s")"+";"+insertDefaultProject()
 
   private def insertDefaultProject() = s"INSERT INTO $TABLE_NAME_PROJECTS (ID, NAME) VALUES (1, \'DEFAULT\')"
