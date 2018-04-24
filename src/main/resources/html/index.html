@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Basched</title>
+
+    <script src="html/jquery-3.3.1.min.js"></script>
+    <script src="html/script.js"></script>
+</head>
+<body>
+    <div><h1 id="time">00:00</h1><p id="intervalTime">00:00</p></div>
+    <button id="startTaskBtn" onclick="toggleStartStopButton()">Start</button>
+    <button onclick="gotoAddTaskPage()">Add Tasks</button>
+    <button onClick="notifyMe()">Notify Me !</button>
+    <table id="current_task">
+        <tr><th>Project</th><th>Current Task</th><th>Priority</th></tr>
+    </table>
+    <table id="tasks_table">
+        <tr><th>Project</th><th>Other Tasks</th><th>Priority</th></tr>
+    </table>
+</body>
+</html>
